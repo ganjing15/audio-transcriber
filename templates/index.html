@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Transcriber</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f7fa;
+        }
+        h1, h2 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .upload-form {
+            margin: 30px 0;
+            text-align: center;
+        }
+        .file-input-container {
+            display: inline-block;
+            position: relative;
+            margin-bottom: 20px;
+        }
+        .file-input {
+            margin-bottom: 15px;
+        }
+        .btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 25px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s ease;
+            display: inline-block;
+            margin: 5px 0;
+        }
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        .btn:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        .language-select {
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            margin: 0 10px;
+            font-size: 16px;
+        }
+        .progress-container {
+            margin: 20px 0;
+            display: none;
+        }
+        .progress {
+            height: 8px;
+            background-color: #ecf0f1;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-bar {
+            height: 100%;
+            background-color: #3498db;
+            width: 0;
+            transition: width 0.3s ease;
+        }
+        .transcript-container {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #3498db;
+        }
+        .transcript {
+            white-space: pre-wrap;
+            font-size: 16px;
+            line-height: 1.6;
+            min-height: 100px;
+        }
+        .status {
+            font-size: 14px;
+            margin: 10px 0;
+            color: #7f8c8d;
+        }
+        .error {
+            color: #e74c3c;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .note {
+            font-size: 14px;
+            color: #7f8c8d;
+            text-align: center;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Audio Transcriber</h1>
+        <p class="status" id="statusText">Ready to transcribe M4A audio files.</p>
+        
+        <!-- Simple file upload form -->
+        <form id="uploadForm" class="upload-form" enctype="multipart/form-data">
+            <div class="file-input-container">
+                <input type="file" id="audioFile" name="file" class="file-input" accept=".m4a">
+            </div>
+            
+            <div>
+                <label for="language">Language:</label>
+                <select id="language" name="language" class="language-select">
+                    <option value="auto">Auto-detect</option>
+                    <option value="zh">Chinese (Simplified)</option>
+                    <option value="en">English</option>
+                </select>
+            </div>
+            
+            <button type="submit" id="submitBtn" class="btn">Transcribe Audio</button>
+        </form>
+        
+        <!-- Progress indicator -->
+        <div id="progressContainer" class="progress-container">
+            <div class="progress">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+            <p id="progressText">Uploading...</p>
+        </div>
+        
+        <!-- Error messages -->
+        <div id="errorContainer" class="error"></div>
+        
+        <!-- Transcription results -->
+        <div class="transcript-container">
+            <h2>Transcription</h2>
+            <div id="transcript" class="transcript">Your transcription will appear here after processing.</div>
+            <button id="copyBtn" class="btn">Copy to Clipboard</button>
+        </div>
+        
+        <p class="note">Note: Currently only M4A audio files are supported. Maximum file size is 16MB.</p>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Elements
+            const form = document.getElementById('uploadForm');
+            const fileInput = document.getElementById('audioFile');
+            const submitBtn = document.getElementById('submitBtn');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const transcript = document.getElementById('transcript');
+            const errorContainer = document.getElementById('errorContainer');
+            const statusText = document.getElementById('statusText');
+            const copyBtn = document.getElementById('copyBtn');
+            
+            // Clear any existing error
+            errorContainer.textContent = '';
+            
+            // Handle file input change
+            fileInput.addEventListener('change', function() {
+                if (fileInput.files && fileInput.files.length > 0) {
+                    const file = fileInput.files[0];
+                    
+                    // Validate file type
+                    if (!file.name.toLowerCase().endsWith('.m4a')) {
+                        errorContainer.textContent = 'Please select an M4A audio file.';
+                        fileInput.value = ''; // Clear the file input
+                        return;
+                    }
+                    
+                    // Clear previous errors
+                    errorContainer.textContent = '';
+                    statusText.textContent = 'File selected: ' + file.name;
+                }
+            });
+            
+            // Handle form submission
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                // Get the file
+                const file = fileInput.files[0];
+                
+                // Check if file is selected
+                if (!file) {
+                    errorContainer.textContent = 'Please select an M4A audio file.';
+                    return;
+                }
+                
+                // Create FormData object
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('language', document.getElementById('language').value);
+                
+                // Update UI for processing
+                submitBtn.disabled = true;
+                progressContainer.style.display = 'block';
+                statusText.textContent = 'Processing...';
+                transcript.textContent = 'Transcribing your audio...';
+                errorContainer.textContent = '';
+                
+                // Create and configure XMLHttpRequest
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/upload', true);
+                
+                // Track upload progress
+                xhr.upload.onprogress = function(e) {
+                    if (e.lengthComputable) {
+                        const percentComplete = (e.loaded / e.total) * 100;
+                        progressBar.style.width = percentComplete + '%';
+                        progressText.textContent = `Uploading: ${Math.round(percentComplete)}%`;
+                    }
+                };
+                
+                // Handle response
+                xhr.onload = function() {
+                    console.log('Response received:', xhr.status, xhr.responseText);
+                    
+                    if (xhr.status === 200) {
+                        progressText.textContent = 'Processing complete!';
+                        progressBar.style.width = '100%';
+                        
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            
+                            if (response.success) {
+                                // Show transcript
+                                transcript.textContent = response.transcript;
+                                statusText.textContent = 'Transcription complete!';
+                                statusText.style.color = '#2ecc71'; // Green color for success
+                            } else {
+                                // Show error
+                                const errorMsg = response.error || 'An error occurred during transcription.';
+                                errorContainer.textContent = errorMsg;
+                                transcript.textContent = 'Transcription failed. Please try again.';
+                                statusText.textContent = 'Error occurred';
+                                statusText.style.color = '#e74c3c'; // Red color for error
+                                
+                                // Show network connection advice if it appears to be a network issue
+                                if (errorMsg.includes('timeout') || errorMsg.includes('network') || errorMsg.includes('connect')) {
+                                    const networkAdvice = document.createElement('div');
+                                    networkAdvice.innerHTML = '<p><strong>Network Issue Detected</strong><br>It looks like there might be connectivity issues with the OpenAI API. Please check your internet connection and try again later.</p>';
+                                    networkAdvice.style.marginTop = '10px';
+                                    networkAdvice.style.padding = '10px';
+                                    networkAdvice.style.backgroundColor = '#f8d7da';
+                                    networkAdvice.style.borderRadius = '5px';
+                                    errorContainer.appendChild(networkAdvice);
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Error parsing response:', e);
+                            errorContainer.textContent = 'Error processing response from server.';
+                            transcript.textContent = 'Transcription failed. Please try again.';
+                            statusText.textContent = 'Error occurred';
+                            statusText.style.color = '#e74c3c'; // Red color for error
+                        }
+                    } else {
+                        errorContainer.textContent = 'Server returned an error: ' + xhr.status;
+                        transcript.textContent = 'Transcription failed. Please try again.';
+                        statusText.textContent = 'Server error occurred';
+                        statusText.style.color = '#e74c3c'; // Red color for error
+                    }
+                    
+                    // Re-enable submit button
+                    submitBtn.disabled = false;
+                    progressContainer.style.display = 'none';
+                };
+                
+                // Handle network errors
+                xhr.onerror = function() {
+                    console.error('Network error occurred');
+                    errorContainer.innerHTML = '<strong>Network Error</strong><br>A network error occurred. Please check your internet connection and try again.';
+                    statusText.textContent = 'Network error';
+                    statusText.style.color = '#e74c3c'; // Red color for error
+                    submitBtn.disabled = false;
+                    progressContainer.style.display = 'none';
+                    transcript.textContent = 'Transcription failed due to network error. Please try again.';
+                    
+                    // Add a retry button
+                    const retryButton = document.createElement('button');
+                    retryButton.textContent = 'Retry Connection';
+                    retryButton.className = 'btn';
+                    retryButton.style.marginLeft = '10px';
+                    retryButton.style.backgroundColor = '#3498db';
+                    retryButton.onclick = function() {
+                        // Simple ping to test connectivity
+                        statusText.textContent = 'Testing connection...';
+                        statusText.style.color = '#f39c12'; // Orange for pending
+                        errorContainer.textContent = '';
+                        
+                        const pingXhr = new XMLHttpRequest();
+                        pingXhr.open('GET', '/', true);
+                        pingXhr.timeout = 5000;
+                        
+                        pingXhr.onload = function() {
+                            if (pingXhr.status === 200) {
+                                errorContainer.textContent = 'Connection restored. You can try transcribing again.';
+                                statusText.textContent = 'Ready';
+                                statusText.style.color = '#2ecc71'; // Green for success
+                            } else {
+                                errorContainer.textContent = 'Server is reachable but returned an error. Please try again later.';
+                                statusText.textContent = 'Connection issues';
+                                statusText.style.color = '#e74c3c'; // Red for error
+                            }
+                        };
+                        
+                        pingXhr.onerror = function() {
+                            errorContainer.textContent = 'Still having connection issues. Please check your internet or try again later.';
+                            statusText.textContent = 'Connection failed';
+                            statusText.style.color = '#e74c3c'; // Red for error
+                        };
+                        
+                        pingXhr.send();
+                    };
+                    
+                    errorContainer.appendChild(retryButton);
+                };
+                
+                // Handle timeout
+                xhr.ontimeout = function() {
+                    console.error('Request timed out');
+                    errorContainer.innerHTML = '<strong>Request Timed Out</strong><br>The connection to the server timed out. This could be due to:<br>' + 
+                        '• Network connectivity issues<br>' +
+                        '• Server being busy<br>' +
+                        '• File size too large<br><br>' +
+                        'Try a shorter audio file or try again later when the network might be more stable.';
+                    errorContainer.style.lineHeight = '1.4';
+                    statusText.textContent = 'Request timed out';
+                    statusText.style.color = '#e74c3c'; // Red color for error
+                    submitBtn.disabled = false;
+                    progressContainer.style.display = 'none';
+                    transcript.textContent = 'Transcription timed out. Please try again later or with a shorter audio file.';
+                };
+                
+                // Set timeout to 120 seconds
+                xhr.timeout = 120000;
+                
+                // Send the request
+                xhr.send(formData);
+            });
+            
+            // Copy button functionality
+            copyBtn.addEventListener('click', function() {
+                const text = transcript.textContent;
+                
+                try {
+                    navigator.clipboard.writeText(text).then(() => {
+                        const originalText = copyBtn.textContent;
+                        copyBtn.textContent = 'Copied!';
+                        setTimeout(() => {
+                            copyBtn.textContent = originalText;
+                        }, 2000);
+                    });
+                } catch (err) {
+                    console.error('Failed to copy text: ', err);
+                    errorContainer.textContent = 'Failed to copy text to clipboard.';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
