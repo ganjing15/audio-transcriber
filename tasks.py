@@ -1,5 +1,5 @@
 import os
-from app import client, api_key
+from openai_client import client, api_key
 import httpx
 
 def transcribe_audio(filepath, language):
