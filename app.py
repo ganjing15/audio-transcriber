@@ -1,6 +1,11 @@
 import os
 import tempfile
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, url_for
+from redis import Redis
+from rq import Queue
+import tasks
+import time
+import json
 from werkzeug.utils import secure_filename
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -47,6 +52,11 @@ app.config['UPLOAD_FOLDER'] = tempfile.gettempdir()  # Use temp directory for up
 app.config['ALLOWED_EXTENSIONS'] = {'m4a'}
 app.config['OFFLINE_DEMO_MODE'] = False  # Disable offline demo mode to use real OpenAI API
 
+# Set up RQ (Redis Queue)
+redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+redis_conn = Redis.from_url(redis_url)
+q = Queue(connection=redis_conn)
+
 def allowed_file(filename):
     """Check if the file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
@@ -65,111 +75,44 @@ SAMPLE_TRANSCRIPTIONS = {
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Handle file upload and transcription"""
+    """Handle file upload and enqueue transcription job"""
     print("\n--- Starting new upload request ---")
     print(f"Request form data: {request.form}")
-    
     # Check if file part exists in the request
     if 'file' not in request.files:
         print("Error: No file part in request")
         return jsonify({'error': 'No file part'}), 400
-    
     file = request.files['file']
     print(f"File received: {file.filename}")
-    
     # Check if file was selected
     if file.filename == '':
         print("Error: Empty filename")
         return jsonify({'error': 'No file selected'}), 400
-    
     # Check if file type is allowed
     if not allowed_file(file.filename):
         print(f"Error: File type not allowed - {file.filename}")
         return jsonify({'error': 'File type not allowed. Please upload an M4A file.'}), 400
-    
-    filepath = None  # Define filepath outside try block for error handling
-    
     try:
-        # Save the file temporarily
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         print(f"File saved temporarily at: {filepath}")
-        
-        # Make sure the OpenAI client is available
-        if not api_key:
-            print("Error: OpenAI API key is not available")
-            return jsonify({
-                'success': False,
-                'error': 'OpenAI API key is not configured. Please check your .env file.'
-            }), 500
-        
-        # Check if we're in offline demo mode
-        if app.config['OFFLINE_DEMO_MODE']:
-            print("OFFLINE DEMO MODE: Using sample transcription instead of API call")
-            # Get language preference
-            language = request.form.get('language')
-            print(f"Selected language: {language}")
-            
-            # Simulate processing time to make the demo feel realistic
-            import time, random
-            time.sleep(random.uniform(1.5, 3.0))  # Simulate processing time
-            
-            # Get the appropriate sample transcription based on language
-            if language == 'zh':
-                transcript_text = SAMPLE_TRANSCRIPTIONS['zh']
-            elif language == 'en':
-                transcript_text = SAMPLE_TRANSCRIPTIONS['en']
-            else:
-                transcript_text = SAMPLE_TRANSCRIPTIONS['auto']
-                
-            # Add demo mode notice
-            transcript_text += "\n\n[DEMO MODE ACTIVE: This is a simulated transcription. The app is running in offline mode due to network connectivity issues with the OpenAI API.]"
-            print(f"Demo mode transcript: {transcript_text[:50]}...")
-        else:
-            # Normal mode - Transcribe the audio file using OpenAI's Whisper API
-            try:
-                # Get language preference
-                language = request.form.get('language')
-                print(f"Selected language: {language}")
-                
-                with open(filepath, 'rb') as audio_file:
-                    print("File opened successfully for reading")
-                    
-                    # Set up transcription parameters
-                    params = {
-                        "model": "whisper-1",
-                        "file": audio_file
-                    }
-                    
-                    # Add language parameter if specified
-                    if language and language != 'auto':
-                        if language == 'zh':
-                            params["language"] = "zh"
-                        elif language == 'en':
-                            params["language"] = "en"
-                    
-                    print(f"Sending request with params: {params}")
-                    
-                    # Make the API call with retry logic
-                    print("Making API call to OpenAI Whisper...")
-                    max_retries = 2
-                    retry_count = 0
-                    
-                    while retry_count <= max_retries:
-                        try:
-                            print(f"API call attempt {retry_count + 1}/{max_retries + 1}")
-                            transcript = client.audio.transcriptions.create(**params)
-                            print("API call completed successfully")
-                            break  # Success, exit the retry loop
-                        except httpx.TimeoutException as timeout_err:
-                            retry_count += 1
-                            if retry_count <= max_retries:
-                                print(f"Request timed out, retrying ({retry_count}/{max_retries})...")
-                                continue
-                            else:
-                                print("All retry attempts failed with timeout errors")
-                                raise httpx.TimeoutException("Network connection to OpenAI API timed out after multiple attempts. Please check your internet connection.") from timeout_err
+        language = request.form.get('language', 'auto')
+        # Enqueue the transcription job
+        job = q.enqueue(tasks.transcribe_audio, filepath, language)
+        print(f"Enqueued job: {job.id}")
+        return jsonify({
+            'success': True,
+            'job_id': job.id,
+            'status_url': url_for('job_status', job_id=job.id, _external=True),
+            'result_url': url_for('get_result', job_id=job.id, _external=True)
+        })
+    except Exception as e:
+        import traceback
+        print(f"FILE UPLOAD ERROR: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({'success': False, 'error': f"File upload failed: {str(e)}"}), 500
+ction.") from timeout_err
                         except Exception as e:
                             # For other errors, don't retry
                             print(f"API call failed with error: {e}")
@@ -226,6 +169,31 @@ def upload_file():
             'success': False,
             'error': f"File upload failed: {str(e)}"
         }), 500
+
+@app.route('/job_status/<job_id>', methods=['GET'])
+def job_status(job_id):
+    job = q.fetch_job(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+    return jsonify({'success': True, 'status': job.get_status()})
+
+@app.route('/result/<job_id>', methods=['GET'])
+def get_result(job_id):
+    job = q.fetch_job(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+    if job.is_finished:
+        result = job.result
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except Exception:
+                pass
+        return jsonify({'success': True, 'result': result})
+    elif job.is_failed:
+        return jsonify({'success': False, 'error': str(job.exc_info)}), 500
+    else:
+        return jsonify({'success': False, 'status': job.get_status()}), 202
 
 if __name__ == '__main__':
     app.run(debug=True)
