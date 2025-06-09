@@ -1,3 +1,4 @@
+# Minimal change to force Render redeploy
 services:
   # Redis instance
   - type: redis
