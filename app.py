@@ -112,39 +112,6 @@ def upload_file():
         print(f"FILE UPLOAD ERROR: {str(e)}")
         print(traceback.format_exc())
         return jsonify({'success': False, 'error': f"File upload failed: {str(e)}"}), 500
-                        transcript_text = transcript.text
-                        print(f"Retrieved text from transcript object: {transcript_text[:50]}...")
-                    elif isinstance(transcript, dict) and 'text' in transcript:
-                        transcript_text = transcript['text']
-                        print(f"Retrieved text from transcript dict: {transcript_text[:50]}...")
-                    else:
-                        transcript_text = str(transcript)
-                        print(f"Converted transcript to string: {transcript_text[:50]}...")
-            except Exception as e:
-                # If API call fails, fall back to demo mode
-                print(f"API call failed, falling back to demo mode. Error: {e}")
-                app.config['OFFLINE_DEMO_MODE'] = True  # Force demo mode after failure
-                return upload_file()  # Recursively call this function in demo mode
-        
-        # Clean up the temporary file
-        if os.path.exists(filepath):
-            os.remove(filepath)
-            print(f"Deleted temporary file: {filepath}")
-        
-        # Return the transcription with clear structure
-        print("Sending successful response")
-        return jsonify({
-            'success': True,
-            'transcript': transcript_text
-        })
-        
-    except Exception as e:
-        # Log the error with full traceback
-        import traceback
-        print(f"FILE UPLOAD ERROR: {str(e)}")
-        print(traceback.format_exc())
-        
-        # Clean up the temporary file if it exists
         if filepath and os.path.exists(filepath):
             try:
                 os.remove(filepath)
