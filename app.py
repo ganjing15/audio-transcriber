@@ -112,19 +112,6 @@ def upload_file():
         print(f"FILE UPLOAD ERROR: {str(e)}")
         print(traceback.format_exc())
         return jsonify({'success': False, 'error': f"File upload failed: {str(e)}"}), 500
-ction.") from timeout_err
-                        except Exception as e:
-                            # For other errors, don't retry
-                            print(f"API call failed with error: {e}")
-                            raise
-                    
-                    # Print for debugging
-                    print(f"Transcript response type: {type(transcript)}")
-                    print(f"Transcript content: {transcript}")
-                    
-                    # Get the transcript text - handle both object and dict formats
-                    transcript_text = None
-                    if hasattr(transcript, 'text'):
                         transcript_text = transcript.text
                         print(f"Retrieved text from transcript object: {transcript_text[:50]}...")
                     elif isinstance(transcript, dict) and 'text' in transcript:
